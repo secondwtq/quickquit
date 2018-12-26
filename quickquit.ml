@@ -44,10 +44,22 @@ end
 module Platform_Linux_X11 = struct
   let cmd cmd = ("", CCString.split ~by:" " cmd |> CCArray.of_list)
 
+  let str_append s c = s ^ String.make 1 c
+
+  let split_output (src: string) (seg: int): string list =
+    let f ((cur, l) : string * string list) (c: char): string * string list =
+      if List.length l + 1 >= seg then (str_append cur c, l)
+      else
+        match c with
+        | ' ' | '\t' -> if String.length cur > 0 then ("", cur :: l) else (cur, l)
+        | c -> (str_append cur c, l)
+    in
+    let (cur, l) = CCString.fold f ("", []) src in
+    List.rev (cur :: l)
+
   let get_process (pid: int): process Lwt.t =
-    let execpath = Unix.readlink (CCFormat.sprintf "/proc/%u/exec" pid) in
-    let basename = Filename.basename execpath in
-    Lwt.return { pid; basename }
+    let execpath = Unix.readlink (CCFormat.sprintf "/proc/%u/exe" pid) in
+    Lwt.return { pid; basename = Filename.basename execpath }
 
   let get_hidden (id: string): bool Lwt.t =
     let cmdline = CCFormat.sprintf "xprop -id %s _NET_WM_STATE" id in
@@ -57,9 +69,9 @@ module Platform_Linux_X11 = struct
   let get_windows (): (window list) Lwt.t =
     Lwt_process.pread_lines (cmd "wmctrl -lGpx") |>
     Lwt_stream.map_s (fun s ->
-      print_endline s;
       let id :: desk :: pid :: l :: t :: w :: h :: klass :: hostname :: title :: _ =
-        CCString.split ~by:" " s
+        split_output s 10
+        (* CCString.split ~by:" " s *)
       in
       let%lwt proc = get_process (int_of_string pid)
       and hidden = get_hidden id in
