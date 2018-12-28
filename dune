@@ -1,4 +1,4 @@
 (executable
   (name quickquit)
-  (libraries containers lwt.unix)
+  (libraries containers lwt.unix cmdliner)
   (preprocess (pps lwt_ppx ppx_deriving ppx_deriving.std)))
