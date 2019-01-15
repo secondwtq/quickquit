@@ -7,8 +7,9 @@ type process = {
 type window = {
   id: string;
   title: string;
-  proc: process;
+  proc: process option;
   hidden: bool;
+  klass: string;
 } [@@deriving show]
 
 module Target = struct
@@ -17,7 +18,14 @@ module Target = struct
     let const: bool -> t = fun c _ -> Lwt.return c
 
     let exact_basename: string -> t = fun basename w ->
-      Lwt.return (CCString.equal w.proc.basename basename)
+      Lwt.return (
+        match w.proc with
+        | Some proc -> CCString.equal proc.basename basename
+        | None -> false
+      )
+
+    let exact_classname: string -> t = fun classname w ->
+      CCString.equal w.klass classname |> Lwt.return
 
     let _or_: t -> t -> t = fun l r w ->
       let%lwt l = l w
@@ -41,6 +49,8 @@ module Targets = struct
 
   let emacs: t = _or_ (exact_basename "emacs") (exact_basename "emacs-26.1")
 
+  let code: t = (exact_classname "code-oss.code-oss")
+
   let get_target (name: string): t =
     match CCString.lowercase name with
     | "dolphin" -> dolphin
@@ -48,6 +58,7 @@ module Targets = struct
     | "chrome" -> chrome
     | "term" -> term
     | "emacs" -> emacs
+    | "code" -> code
     | _ -> none (* TODO: add warning *)
 
 end
@@ -81,9 +92,11 @@ module Platform_Linux_X11 = struct
     let (cur, l) = CCString.fold f ("", []) src in
     List.rev (cur :: l)
 
-  let get_process (pid: int): process Lwt.t =
-    let execpath = Unix.readlink (sprintf "/proc/%u/exe" pid) in
-    Lwt.return { pid; basename = Filename.basename execpath }
+  let get_process (pid: int): process option Lwt.t =
+    try
+      let execpath = Unix.readlink (sprintf "/proc/%u/exe" pid) in
+      Lwt.return (Some { pid; basename = Filename.basename execpath })
+    with _ -> Lwt.return None
 
   let get_hidden (id: string): bool Lwt.t =
     let%lwt t = Lwt_process.pread (cmd (sprintf "xprop -id %s _NET_WM_STATE" id)) in
@@ -103,7 +116,7 @@ module Platform_Linux_X11 = struct
       in
       let%lwt proc = get_process (int_of_string pid)
       and hidden = get_hidden id in
-        Lwt.return { id; title; proc; hidden }) |>
+        Lwt.return { id; title; proc; hidden; klass }) |>
     Lwt_stream.to_list
 
   let switch_to_window_id (id: string): unit Lwt.t =
